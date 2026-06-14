@@ -1,281 +1,180 @@
--- =============================================================================
--- FIXED RIOT CITY MULTI-TAB PANEL (AUTO-LOADS CONTROLS INSTANTLY)
--- FEATURES: COMPACT TOGGLE, MULTI-TAB WINDOW, DESIGN THEMES, RIGID DRAG LOGIC
--- =============================================================================
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
+local UIS = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
-
 local char = player.Character or player.CharacterAdded:Wait()
-player.CharacterAdded:Connect(function(newChar)
-	char = newChar
+
+-- ================= GUI (RGB COMMAND PANEL) =================
+local gui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+gui.Name = "CommandPanel"
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 220, 0, 200)
+frame.Position = UDim2.new(0, 20, 0, 80)
+frame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1,0,0,30)
+title.Text = "COMMAND PANEL"
+title.TextColor3 = Color3.new(1,1,1)
+title.BackgroundTransparency = 1
+
+-- RGB effect
+spawn(function()
+	while true do
+		for i = 0,1,0.01 do
+			frame.BorderColor3 = Color3.fromHSV(i,1,1)
+			wait()
+		end
+	end
 end)
 
--- 1. Base Container Setup
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "RiotCityEngineeredPanel"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+-- Toggle Button
+local toggle = Instance.new("TextButton", gui)
+toggle.Size = UDim2.new(0,100,0,30)
+toggle.Position = UDim2.new(0,20,0,20)
+toggle.Text = "OPEN"
 
-if syn and syn.protect_gui then
-	syn.protect_gui(ScreenGui)
-	ScreenGui.Parent = CoreGui
-elseif gethui then
-	ScreenGui.Parent = gethui()
-else
-	ScreenGui.Parent = CoreGui:FindFirstChild("RobloxGui") or CoreGui
+local open = true
+toggle.MouseButton1Click:Connect(function()
+	open = not open
+	frame.Visible = open
+end)
+
+-- ================= BUTTONS =================
+local function button(txt, y)
+	local b = Instance.new("TextButton", frame)
+	b.Size = UDim2.new(1,-20,0,30)
+	b.Position = UDim2.new(0,10,0,y)
+	b.Text = txt
+	return b
 end
 
--- 2. Build Compact Small Opening Button
-local OpenToggleButton = Instance.new("TextButton")
-OpenToggleButton.Name = "OpenToggleButton"
-OpenToggleButton.Size = UDim2.new(0, 80, 0, 32)
-OpenToggleButton.Position = UDim2.new(0, 20, 0, 20)
-OpenToggleButton.BackgroundColor3 = Color3.fromRGB(255, 75, 75)
-OpenToggleButton.Text = "OPEN"
-OpenToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-OpenToggleButton.TextSize = 13
-OpenToggleButton.Font = Enum.Font.GothamBold
-OpenToggleButton.Parent = ScreenGui
+local flyBtn = button("Fly: OFF",40)
+local noclipBtn = button("Noclip: OFF",80)
+local espBtn = button("ESP: OFF",120)
 
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(0, 6)
-ToggleCorner.Parent = OpenToggleButton
+-- ================= FLY (PC + MOBILE) =================
+local flying = false
+local velocity
 
--- 3. Build Main Expanded Panel Framing
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 520, 0, 320)
-MainFrame.Position = UDim2.new(0, 20, 0, 70) 
-MainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Visible = false 
-MainFrame.Parent = ScreenGui
+local function getMoveDirection()
+	local move = Vector3.zero
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 10)
-MainCorner.Parent = MainFrame
+	-- PC
+	if UIS:IsKeyDown(Enum.KeyCode.W) then move += workspace.CurrentCamera.CFrame.LookVector end
+	if UIS:IsKeyDown(Enum.KeyCode.S) then move -= workspace.CurrentCamera.CFrame.LookVector end
 
-local MainStroke = Instance.new("UIStroke")
-MainStroke.Color = Color3.fromRGB(255, 75, 75) 
-MainStroke.Thickness = 2
-MainStroke.Parent = MainFrame
+	-- Mobile joystick support
+	if player.Character and player.Character:FindFirstChild("Humanoid") then
+		move += player.Character.Humanoid.MoveDirection
+	end
 
--- Close Button inside Main Window (Top Right)
-local CloseWindowButton = Instance.new("TextButton")
-CloseWindowButton.Name = "CloseWindowButton"
-CloseWindowButton.Size = UDim2.new(0, 24, 0, 24)
-CloseWindowButton.Position = UDim2.new(1, -34, 0, 10)
-CloseWindowButton.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
-CloseWindowButton.Text = "X"
-CloseWindowButton.TextColor3 = Color3.fromRGB(255, 75, 75)
-CloseWindowButton.TextSize = 12
-CloseWindowButton.Font = Enum.Font.GothamBold
-CloseWindowButton.Parent = MainFrame
+	return move
+end
 
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(0, 6)
-CloseCorner.Parent = CloseWindowButton
+flyBtn.MouseButton1Click:Connect(function()
+	flying = not flying
+	flyBtn.Text = "Fly: " .. (flying and "ON" or "OFF")
 
-OpenToggleButton.MouseButton1Click:Connect(function()
-	MainFrame.Visible = true
-	OpenToggleButton.Visible = false
+	if flying then
+		velocity = Instance.new("BodyVelocity")
+		velocity.MaxForce = Vector3.new(1e5,1e5,1e5)
+		velocity.Parent = char:WaitForChild("HumanoidRootPart")
+
+		RunService.RenderStepped:Connect(function()
+			if flying then
+				velocity.Velocity = getMoveDirection() * 60
+			end
+		end)
+	else
+		if velocity then velocity:Destroy() end
+	end
 end)
 
-CloseWindowButton.MouseButton1Click:Connect(function()
-	MainFrame.Visible = false
-	OpenToggleButton.Visible = true
+-- ================= NOCLIP =================
+local noclip = false
+
+RunService.Stepped:Connect(function()
+	if noclip and char then
+		for _,v in pairs(char:GetDescendants()) do
+			if v:IsA("BasePart") then
+				v.CanCollide = false
+			end
+		end
+	end
 end)
 
--- 4. Build Left Sidebar Navigation Panel
-local LeftSidebar = Instance.new("Frame")
-LeftSidebar.Name = "LeftSidebar"
-LeftSidebar.Size = UDim2.new(0, 150, 1, 0)
-LeftSidebar.Position = UDim2.new(0, 0, 0, 0)
-LeftSidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-LeftSidebar.BorderSizePixel = 0
-LeftSidebar.Parent = MainFrame
+noclipBtn.MouseButton1Click:Connect(function()
+	noclip = not noclip
+	noclipBtn.Text = "Noclip: " .. (noclip and "ON" or "OFF")
+end)
 
-local SideCorner = Instance.new("UICorner")
-SideCorner.CornerRadius = UDim.new(0, 10)
-SideCorner.Parent = LeftSidebar
+-- ================= ESP (FULL BODY + LINE) =================
+local espEnabled = false
+local espFolder = Instance.new("Folder", workspace)
 
-local SideFlattenBlocker = Instance.new("Frame")
-SideFlattenBlocker.Size = UDim2.new(0, 15, 1, 0)
-SideFlattenBlocker.Position = UDim2.new(1, -15, 0, 0)
-SideFlattenBlocker.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-SideFlattenBlocker.BorderSizePixel = 0
-SideFlattenBlocker.Parent = LeftSidebar
+local function getColor(team)
+	if team == "Criminal" then
+		return Color3.fromRGB(255,0,0)
+	elseif team == "Cops" then
+		return Color3.fromRGB(0,0,255)
+	elseif team == "Inmate" then
+		return Color3.fromRGB(255,165,0)
+	else
+		return Color3.fromRGB(255,255,255)
+	end
+end
 
-local MenuTitle = Instance.new("TextLabel")
-MenuTitle.Size = UDim2.new(1, 0, 0, 45)
-MenuTitle.BackgroundTransparency = 1
-MenuTitle.Text = "RIOT CITY"
-MenuTitle.TextColor3 = Color3.fromRGB(255, 75, 75)
-MenuTitle.TextSize = 16
-MenuTitle.Font = Enum.Font.GothamBold
-MenuTitle.Parent = LeftSidebar
+local function createESP(p)
+	if p == player then return end
 
--- Tab Navigation Button Housing
-local TabButtonContainer = Instance.new("Frame")
-TabButtonContainer.Size = UDim2.new(1, 0, 0, 100)
-TabButtonContainer.Position = UDim2.new(0, 0, 0, 50)
-TabButtonContainer.BackgroundTransparency = 1
-TabButtonContainer.Parent = LeftSidebar
+	local function apply(char)
+		-- FULL BODY HIGHLIGHT
+		local highlight = Instance.new("Highlight")
+		highlight.FillTransparency = 0.5
+		highlight.OutlineColor = getColor(p.Team and p.Team.Name or "")
+		highlight.Parent = char
 
-local TabListLayout = Instance.new("UIListLayout")
-TabListLayout.Padding = UDim.new(0, 6)
-TabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-TabListLayout.Parent = TabButtonContainer
+		-- LINE ESP (Tracer)
+		local beamPart0 = Instance.new("Attachment", player.Character.HumanoidRootPart)
+		local beamPart1 = Instance.new("Attachment", char.HumanoidRootPart)
 
--- Persistent Credits Layout (Anchored Bottom-Left)
-local CreditsPanel = Instance.new("Frame")
-CreditsPanel.Name = "CreditsPanel"
-CreditsPanel.Size = UDim2.new(1, 0, 0, 50)
-CreditsPanel.Position = UDim2.new(0, 0, 1, -50)
-CreditsPanel.BackgroundTransparency = 1
-CreditsPanel.Parent = LeftSidebar
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = beamPart0
+		beam.Attachment1 = beamPart1
+		beam.Color = ColorSequence.new(getColor(p.Team and p.Team.Name or ""))
+		beam.Width0 = 0.1
+		beam.Width1 = 0.1
+		beam.Parent = char
+	end
 
-local DevTitle = Instance.new("TextLabel")
-DevTitle.Size = UDim2.new(1, 0, 0, 15)
-DevTitle.Position = UDim2.new(0, 0, 0, 5)
-DevTitle.BackgroundTransparency = 1
-DevTitle.Text = "CREATED BY:"
-DevTitle.TextColor3 = Color3.fromRGB(140, 140, 150)
-DevTitle.TextSize = 10
-DevTitle.Font = Enum.Font.GothamBold
-DevTitle.Parent = CreditsPanel
+	if p.Character then
+		apply(p.Character)
+	end
 
-local DevName = Instance.new("TextLabel")
-DevName.Size = UDim2.new(1, 0, 0, 20)
-DevName.Position = UDim2.new(0, 0, 0, 20)
-DevName.BackgroundTransparency = 1
-DevName.Text = "Marc20021120"
-DevName.TextColor3 = Color3.fromRGB(220, 220, 230)
-DevName.TextSize = 12
-DevName.Font = Enum.Font.GothamSemibold
-DevName.Parent = CreditsPanel
+	p.CharacterAdded:Connect(apply)
+end
 
--- 5. Build Dual Internal Display Tab Windows
-local MainTabFrame = Instance.new("ScrollingFrame")
-MainTabFrame.Name = "MainTabFrame"
-MainTabFrame.Size = UDim2.new(1, -170, 1, -60)
-MainTabFrame.Position = UDim2.new(0, 160, 0, 45)
-MainTabFrame.BackgroundTransparency = 1
-MainTabFrame.BorderSizePixel = 0
-MainTabFrame.CanvasSize = UDim2.new(0, 0, 0, 350)
-MainTabFrame.ScrollBarThickness = 4
-MainTabFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 70)
-MainTabFrame.Visible = true -- FIX: Automatically forced visible on start
-MainTabFrame.Parent = MainFrame
+espBtn.MouseButton1Click:Connect(function()
+	espEnabled = not espEnabled
+	espBtn.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
 
-local MainListLayout = Instance.new("UIListLayout")
-MainListLayout.Padding = UDim.new(0, 8)
-MainListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-MainListLayout.Parent = MainTabFrame
+	espFolder:ClearAllChildren()
 
-local SettingsTabFrame = Instance.new("Frame")
-SettingsTabFrame.Name = "SettingsTabFrame"
-SettingsTabFrame.Size = UDim2.new(1, -170, 1, -60)
-SettingsTabFrame.Position = UDim2.new(0, 160, 0, 45)
-SettingsTabFrame.BackgroundTransparency = 1
-SettingsTabFrame.Visible = false 
-SettingsTabFrame.Parent = MainFrame
+	if espEnabled then
+		for _,p in pairs(Players:GetPlayers()) do
+			createESP(p)
+		end
+	end
+end)
 
-local SettingsListLayout = Instance.new("UIListLayout")
-SettingsListLayout.Padding = UDim.new(0, 12)
-SettingsListLayout.Parent = SettingsTabFrame
-
--- 6. Helper Function To Design Navigation Sidebar Links
-local function createNavigationTab(name, targetFrame)
-	local tabBtn = Instance.new("TextButton")
-	tabBtn.Size = UDim2.new(0, 130, 0, 36)
-	tabBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-	tabBtn.Text = name
-	tabBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
-	tabBtn.TextSize = 13
-	tabBtn.Font = Enum.Font.GothamSemibold
-	tabBtn.Parent = TabButtonContainer
-
-	local tabCorner = Instance.new("UICorner")
-	tabCorner.CornerRadius = UDim.new(0, 6)
-	tabCorner.Parent = tabBtn
-
-	tabBtn.MouseButton1Click:Connect(function()
-		MainTabFrame.Visible = false
-		SettingsTabFrame.Visible = false
-		targetFrame.Visible = true
+Players.PlayerAdded:Connect(function(p)
+	p.CharacterAdded:Connect(function()
+		if espEnabled then
+			task.wait(1)
+			createESP(p)
+		end
 	end)
-end
-
-createNavigationTab("Main", MainTabFrame)
-createNavigationTab("Settings", SettingsTabFrame)
-
--- Helper Function to Build Standard Function Buttons
-local function buildStandardButton(text)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(1, -10, 0, 42)
-	btn.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
-	btn.BorderSizePixel = 0
-	btn.Text = "  " .. text
-	btn.TextColor3 = Color3.fromRGB(235, 235, 240)
-	btn.TextSize = 14
-	btn.Font = Enum.Font.GothamSemibold
-	btn.TextXAlignment = Enum.TextXAlignment.Left
-	btn.Parent = MainTabFrame
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = btn
-	
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(55, 55, 65)
-	stroke.Thickness = 1
-	stroke.Parent = btn
-
-	btn.MouseEnter:Connect(function() btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55) end)
-	btn.MouseLeave:Connect(function() btn.BackgroundColor3 = Color3.fromRGB(35, 35, 42) end)
-	return btn
-end
-
--- FIX: The function buttons are now directly mounted onto the automatically visible MainTabFrame
-local flyBtn = buildStandardButton("Fly: OFF")
-local noclipBtn = buildStandardButton("Noclip: OFF")
-local espBtn = buildStandardButton("ESP: OFF")
-
--- Setup Interactive Settings Area Elements
-local settingsHeader = Instance.new("TextLabel")
-settingsHeader.Size = UDim2.new(1, 0, 0, 20)
-settingsHeader.BackgroundTransparency = 1
-settingsHeader.Text = "SELECT INTERFACE THEME:"
-settingsHeader.TextColor3 = Color3.fromRGB(160, 160, 170)
-settingsHeader.TextSize = 13
-settingsHeader.Font = Enum.Font.GothamBold
-settingsHeader.TextXAlignment = Enum.TextXAlignment.Left
-settingsHeader.Parent = SettingsTabFrame
-
-local ColorRow = Instance.new("Frame")
-ColorRow.Size = UDim2.new(1, 0, 0, 40)
-ColorRow.BackgroundTransparency = 1
-ColorRow.Parent = SettingsTabFrame
-
-local ColorRowLayout = Instance.new("UIListLayout")
-ColorRowLayout.FillDirection = Enum.FillDirection.Horizontal
-ColorRowLayout.Padding = UDim.new(0, 10)
-ColorRowLayout.Parent = ColorRow
-
-local themesList = {
-	{Color = Color3.fromRGB(255, 75, 75), Name = "Crimson"},
-	{Color = Color3.fromRGB(0, 220, 255), Name = "Cyan"},
-	{Color = Color3.fromRGB(50, 255, 100), Name = "Lime"},
-	{Color = Color3.fromRGB(255, 200, 50), Name = "Gold"}
-}
-
-for _, theme in ipairs(themesList) do
-	local colorSphere = Instance.new("TextButton")
-	colorSphere.Size = UDim2.new(0, 30, 0, 30)
+end)
